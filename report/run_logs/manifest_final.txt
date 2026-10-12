@@ -1,0 +1,18 @@
+{
+ "lineage": {
+  "bronze.raw_telemetry_a": 0,
+  "bronze.raw_telemetry_b": 0,
+  "bronze.trips_raw": 0,
+  "bronze.video_files": 1,
+  "silver.frames": 25,
+  "silver.telemetry": 0,
+  "silver.frames_flagged": 0,
+  "silver.frame_telemetry": 0,
+  "input_video_sha256": {
+   "drive_b": "bfa62703f645ff77a8578ae3fc74a00881140d38a404d43c8e2af265bbee9fdc",
+   "drive_a": "636ba1a98dfc5ba665d1c935e1d2064e69f4df360ff9ffbd15795957d5e7e9aa"
+  }
+ },
+ "created_at": "2026-10-12T14:52:15.022260+00:00",
+ "manifest_sha256": "bb6993ca5421f808ea026672506560d48002da9187fa7f021c73a169463d5135"
+}

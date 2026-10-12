@@ -7,14 +7,16 @@
 | Họ và tên | Đặng Hữu Tâm |
 | MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `2A202602940` |
 | GitHub | `tam253211-a11y` |
-| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-06667` (MSSV có chữ `A` nên `int(MSSV)` lỗi; dùng phần chữ số `2202602940 % 26 = 18`, phần tử thứ 18 của `cli list-trips`) |
+| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-06667` |
+
+> Cách tính trip: MSSV `2A202602940` có chữ `A` nên lệnh `int(MSSV) % 26` của GUIDE báo lỗi. Mình dùng phần chữ số `2202602940`: `2202602940 % 26 = 18`, phần tử thứ 18 (đếm từ 0) của `scripts/lab.sh cli list-trips` là `trip-06667`.
 
 ## Kết quả cuối
 
-- `dataset_version` của bạn: `<điền>`  (phải khớp `report/evidence/run_summary.json`)
-- Số khung hình train / val / test của bạn: `<điền>`
-- `report/verify.txt`: tạo bằng `python3 scripts/check_submission.py --save-verify` (phải có `27/27 checks passed`).
-- Ảnh chụp trong `report/screenshots/`: `airflow_graph.png`, `minio_lake.png`, `metabase_dashboard.png`, và ảnh bài tập sập/chạy lại (log task đỏ thấy trip của bạn).
+- `dataset_version` của bạn: `a55001de6327`  (khớp `report/evidence/run_summary.json`, lượt `step all --reset` cuối)
+- Số khung hình train / val / test của bạn: `654 / 196 / 169` (tổng 1019; số trip 18 / 4 / 4)
+- `report/verify.txt`: `27/27 checks passed`. Trên Windows, `check_submission.py --save-verify` không gọi được `scripts/lab.sh` (Python của Windows không chạy được file `.sh`), nên file được tạo bằng chính lệnh mà script đó gọi: `bash scripts/lab.sh verify > report/verify.txt`.
+- Ảnh chụp trong `report/screenshots/`: `airflow_graph.png`, `minio_lake.png`, `metabase_dashboard.png`, ảnh bài tập sập `fail_task_log.png` (log task đỏ thấy `trip-06667`), `airflow_fail_graph.png`, `airflow_retry_graph.png` (xanh sau khi clear), cùng ảnh thêm `minio_gold_dataset.png`. Log từng bước nằm trong `report/run_logs/`.
 
 ## Bước 1 · Bronze
 
@@ -174,7 +176,7 @@ Dataset `a55001de6327` (1019 khung: drive A 436, drive B 583) được tạo t�
 - Hai video gốc có đúng hai sha256 ở trên.
 - Telemetry thô A và B ở **version 0** của bảng bronze.
 - Bảng `video_files` ở **version 1** (chứa offset 1500 ms của B).
-- `silver.frames` ở **version 27**. Số version cao vì 26 lần ghi theo partition trip, cộng thêm 2 lần chạy lại `trip-00003` trong thí nghiệm idempotent, nên version của bảng **khác** với dữ liệu: nội dung vẫn y như version 25, chỉ lịch sử dài hơn.
+- `silver.frames` ở **version 27**. Số version cao vì 26 lần ghi theo partition trip, cộng thêm 2 lần chạy lại `trip-00003` trong thí nghiệm idempotent, nên version của bảng **khác** với dữ liệu: nội dung vẫn y như version 25, chỉ lịch sử dài hơn. Ở lượt `step all --reset` cuối (`report/run_logs/manifest_final.txt`), lineage ghi `silver.frames: 25`, còn các mục khác giữ nguyên. `dataset_version` vẫn là `a55001de6327`, và `manifest_sha256` vẫn là `bb6993ca…5135`. Điều này cho thấy version của bảng ghi *lịch sử thao tác*, còn `dataset_version` ghi *nội dung*.
 - Các bảng silver dbt ở version 0.
 - Luật loại khung: đen, mờ, trùng, mất đồng bộ.
 
