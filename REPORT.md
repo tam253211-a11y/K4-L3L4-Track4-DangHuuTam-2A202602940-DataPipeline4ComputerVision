@@ -221,13 +221,23 @@ Sau bài tập mình đã xóa `LAB_FAIL_ONCE` khỏi `.env` và áp dụng lạ
 ### Câu 10
 Nâng từ 2 drive lên **500 xe mỗi ngày**: ba thành phần nào của pipeline này sẽ vỡ đầu tiên, và bạn thay bằng gì (nối với slide 12, 22, 23)?
 
-**Quy mô:** lab hiện có 2 drive × khoảng 5 phút = 10 phút video, 1 camera, ra 1246 khung. Với 500 xe × 8 giờ/ngày thì có khoảng 4000 giờ video **mỗi camera**, gấp khoảng **24 000 lần**, tức khoảng 29 triệu khung/ngày ở 2 fps (L2D gốc có 7 camera, nên nhân thêm 7). Ba thành phần vỡ trước:
+**Quy mô:** lab hiện có 2 drive × khoảng 5 phút = 10 phút video, 1 camera, ra 1246 khung. Slide 38 dùng đúng kịch bản "500 xe, 8 camera mỗi xe, lô + thời gian thực". Theo slide 9, video đã mã hóa khoảng 36 GB/giờ cho mỗi xe. Vậy 500 xe × 8 giờ/ngày là khoảng **144 TB video mỗi ngày**. Chỉ tính 1 camera thì cũng đã gấp khoảng **24 000 lần** lab, tức khoảng 29 triệu khung/ngày ở 2 fps. Ba thành phần vỡ trước:
 
-1. **Giải mã video bằng FFmpeg trong một container Airflow** (`silver_frames`, 1 task cho mỗi trip, chạy trên CPU của một máy, `mem_limit` 2,5 GB). Decode là nút cổ chai (slide 24); hiện cả DAG cho 10 phút video đã mất khoảng 2 phút 48 giây (Airflow, run `run1_xanh`), nhân 24 000 lần là hàng chục ngày máy cho mỗi ngày dữ liệu. **Thay bằng:** worker phân tán (KubernetesExecutor, hoặc Ray/Spark trên một cụm), dùng GPU decode (NVDEC), chỉ decode các khung cần lấy mẫu, và đưa việc trích khung lên gần nguồn (trên xe hoặc ngay lúc ingest), không để lại tới lúc chạy batch.
-2. **DuckDB + dbt chạy trên một file `lakehouse.duckdb`** (slide 22, tầng ELT). Một máy, một tiến trình ghi, dữ liệu phải nằm vừa RAM và đĩa cục bộ; các join ASOF trên hàng tỷ dòng telemetry mỗi ngày sẽ không chạy kịp. **Thay bằng:** engine phân tán đọc thẳng Delta trên object storage (Spark/Databricks, Trino), vẫn giữ dbt làm lớp mô hình và test (dbt-spark), và **xử lý tăng dần** theo partition `ngày/xe` thay vì `--reset` toàn bộ.
-3. **Điều phối và lưu trữ một node:** Airflow LocalExecutor với dynamic mapping (26 task hôm nay sẽ thành hàng chục nghìn mapped task mỗi ngày, làm nghẽn scheduler và metadata DB), cùng MinIO một node chứa hàng chục triệu file JPEG nhỏ. **Thay bằng:** ingest hướng sự kiện (xe upload xong thì có message trên hàng đợi, chẳng hạn Kafka hay S3 event, rồi kích hoạt xử lý cho đúng partition đó); Airflow chỉ điều phối ở mức `ngày × xe`, chạy trên Celery/Kubernetes executor; object storage nhiều node hoặc cloud (S3/GCS), với khung ảnh gom thành shard (WebDataset/TFRecord/Parquet) thay vì mỗi khung một file.
+1. **Decode video bằng FFmpeg trong một container Airflow** (`silver_frames`, 1 task cho mỗi trip, CPU của một máy, `mem_limit` 2,5 GB). Slide 24 chỉ ra decode là nút cổ chai của xử lý khung hình. Ở lab, cả DAG cho 10 phút video đã mất khoảng 2 phút 48 giây (run `run1_xanh`); nhân 24 000 lần là hàng chục ngày máy cho mỗi ngày dữ liệu. **Thay bằng:** xử lý video phân tán bằng **Ray** (ô 7 "Xử lý video nặng" ở slide 38; Ray Data ở slide 24), decode trên GPU bằng **NVIDIA DALI**, chỉ decode các khung cần lấy mẫu. Kết hợp với **trigger lọc ngay trên xe** (slide 31) để chỉ đoạn đáng xem mới được tải lên.
+2. **DuckDB + dbt trên một file `lakehouse.duckdb`.** Slide 22 nói ELT nạp trước rồi biến đổi trong lakehouse, video nằm yên và chỉ metadata đi qua bảng. Hướng đó vẫn đúng, nhưng engine một máy, một tiến trình ghi của lab không chạy nổi join ASOF trên hàng tỷ dòng telemetry mỗi ngày. Slide 23 chọn engine theo độ trễ: **Spark** cho batch hoặc micro-batch "tính lại cả ngày", **Flink** cho cảnh báo telemetry per-event trong vài giây, **dbt** cho SQL theo lịch. **Thay bằng:** Spark (ô 5 "Batch/ELT", slide 38) đọc thẳng bảng **Delta** trên S3; Flink (ô 6) cho luồng telemetry thời gian thực; dbt vẫn giữ làm lớp mô hình và test, nhưng chạy trên Spark. Xử lý **tăng dần** theo partition `ngày/xe` thay vì `--reset` toàn bộ.
+3. **Ingest, điều phối và lưu trữ một node.** Lab đọc CSV và MP4 từ thư mục `data/`. Airflow LocalExecutor với dynamic mapping, nên 26 task hôm nay sẽ thành hàng chục nghìn mapped task mỗi ngày. MinIO một node phải chứa hàng chục triệu file JPEG nhỏ. **Thay bằng:**
+   - Telemetry liên tục đi qua **Kafka** (slide 13–14: streaming, độ trễ cỡ giây).
+   - Video upload thẳng **S3**, queue chỉ mang sự kiện nhỏ (slide 14).
+   - **Airflow** chỉ điều phối ở mức `ngày × xe`, chạy trên executor phân tán.
+   - Object storage là S3/GCS, khung ảnh gom thành shard thay vì mỗi khung một file.
 
-Những gì **giữ nguyên được**: medallion, cách ly có lý do, overwrite theo partition (idempotent), chia theo cảnh, `dataset_version` bằng băm nội dung và lineage. Đó là các nguyên tắc, không phụ thuộc quy mô. *(Mình chưa có slide trong tay để đối chiếu đúng số slide 12/23; phần nối slide dựa trên bảng ánh xạ slide của README.)*
+**Slide 12 (vòng lặp hỏng ở bốn chỗ)** cũng áp dụng khi lên quy mô:
+- "Không đo được": các bộ đếm của lab (quarantine, frame funnel, verify 27/27) phải chuyển thành kiểm tra tự động trên mọi partition, bằng **Great Expectations** (ô 9 ở slide 38) hoặc dbt tests.
+- "Leakage": vẫn chia theo trip/cảnh như gold hiện tại.
+- "Không ai sở hữu": cần **catalog và lineage** (DataHub, ô 10) để biết bảng nào thuộc ai.
+- Version dataset: chuyển từ `manifest.json` sang **lakeFS** (ô 11).
+
+Những gì **giữ nguyên được**: medallion, cách ly có lý do, overwrite theo partition (idempotent, slide 26), chia theo cảnh (slide 33), `dataset_version` bằng băm nội dung và lineage (slide 29–30). Đó là các nguyên tắc, không phụ thuộc quy mô.
 
 ## Metabase
 
