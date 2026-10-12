@@ -5,7 +5,7 @@
 | | |
 |---|---|
 | Họ và tên | Đặng Hữu Tâm |
-| MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `2A202602940` |
+| MSSV | `2A202602940` |
 | GitHub | `tam253211-a11y` |
 | Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-06667` |
 
