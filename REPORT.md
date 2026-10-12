@@ -126,26 +126,64 @@ Khung đen là **lỗi thiết bị**: cả ảnh bằng 0, không có thông ti
 | < 2 m/s (gần dừng) | **59,3%** (54/91) | không có |
 | 2–8 m/s | 11,3% | 0% |
 | 8–15 m/s | 14,5% | 2,5% |
-| ≥ 15 m/s | 23,3% (có trip-04622 đứng hình 6 s) | 10,0% |
+| ≥ 15 m/s | 23,3% | 10,0% |
 
-Xe gần dừng thì 2 khung cách nhau 0,5 s gần như giống hệt, nên trùng nhiều là đúng. Khi xe chạy nhanh, khung nào trùng chủ yếu là do lỗi (đứng hình) hoặc cảnh đơn điệu. Ngưỡng tốt nên **phụ thuộc tốc độ**: chặt hơn (0–1 bit) khi xe chạy nhanh, vì cảnh phải thay đổi nhiều, khung nào trùng gần như chắc chắn là lỗi; nới hơn (2–4 bit) khi xe dừng, để bớt các khung thừa không thêm thông tin. Một cách khác là lấy mẫu theo quãng đường thay vì theo thời gian.
+Xe gần dừng thì 2 khung cách nhau 0,5 s gần như giống hệt, nên trùng nhiều là đúng. Hai chuỗi trùng dài nhất ở A là `trip-08888` (23 khung liên tiếp, 0,1 m/s) và `trip-02086` (16 khung, 0,2 m/s), cả hai đều là xe đứng yên. Khi xe chạy nhanh, khung trùng là dấu hiệu lỗi: `trip-03904` có 11 khung trùng liên tiếp trong khi xe chạy 12,3 m/s, chính là camera **đứng hình** khoảng 6 s mà verify bắt được 11/12. Ngoài ra `trip-04622` có 9 khung trùng ở 17,9 m/s, nhiều khả năng là đoạn đường cao tốc ít chi tiết. Ngưỡng tốt nên **phụ thuộc tốc độ**: chặt hơn (0–1 bit) khi xe chạy nhanh, vì cảnh phải thay đổi nhiều, khung nào trùng gần như chắc chắn là lỗi; nới hơn (2–4 bit) khi xe dừng, để bớt các khung thừa không thêm thông tin. Một cách khác là lấy mẫu theo quãng đường thay vì theo thời gian.
 
 ## Bước 4 · Gold
 
 ### Câu 6
 Dựa vào `leakage.json`: chia theo khung hình làm bao nhiêu trip bị chia cắt, so với chia theo trip? Vì sao điều này làm điểm kiểm thử đẹp một cách giả tạo?
 
-(trả lời ở đây)
+Có 1019 khung đáng dùng, thuộc 26 trip.
+
+| Cách chia | số trip nằm ở hơn 1 split | số trip có khung ở **cả train lẫn test** |
+|---|---|---|
+| Theo khung hình (ngẫu nhiên 70/15/15) | **26/26** | **26/26** |
+| Theo trip (gold của pipeline) | **0** | **0** |
+
+Chia ngẫu nhiên theo khung thì *mọi* trip đều bị xé ra: mỗi trip có khoảng 40–60 khung, nên gần như chắc chắn có vài khung rơi vào test. Pipeline của mình chia nguyên trip: test gồm `trip-00003`, `trip-02134` (drive A) và `trip-05297`, `trip-09209` (drive B); val gồm `trip-04868`, `trip-09608`, `trip-03365`, `trip-05905`. Không trip nào xuất hiện ở 2 split, và test dbt chống rò rỉ đều PASS.
+
+Vì sao điểm đẹp giả tạo: hai khung liền nhau chỉ cách 0,5 s, cùng con đường, cùng ánh sáng, cùng xe phía trước. Ở bước 3, có tới 149/602 khung của A lệch dHash ≤ 2 bit so với khung trước. Nếu khung t nằm ở train và khung t+1 nằm ở test thì model chỉ cần **nhớ** cảnh, không cần **tổng quát hóa**, vẫn đoán đúng. Điểm test khi đó đo khả năng nhận lại cảnh đã thấy, chứ không đo khả năng lái ở con đường mới. Ra đường thật, độ chính xác sẽ tụt so với con số báo cáo. Chia theo trip (theo cảnh) giữ cho test là những cảnh model chưa từng thấy.
 
 ### Câu 7
 Vì sao `dataset_version` là **băm nội dung** chứ không phải ngày giờ hay số đếm? Hai lần chạy liên tiếp cho kết quả gì? Vì sao `dataset_version` của bạn **khác** bạn bè dù cùng dữ liệu (liên hệ MSSV)?
 
-(trả lời ở đây)
+Trong `pipeline/publish.py`, version là 12 ký tự đầu của `sha256` trên danh sách `frame_id|split` của mọi khung trong gold. Nó chỉ phụ thuộc vào **khung nào được dùng và nằm ở split nào**.
+
+- **Lý do không dùng ngày giờ hay số đếm:** cùng một dataset chạy lại sẽ ra version mới, dù nội dung không đổi. Khi đó không phân biệt được "dữ liệu đổi thật" với "chỉ chạy lại". Ngược lại, hai máy cùng chạy có thể ra cùng một số đếm cho hai nội dung khác nhau. Băm nội dung thì **cùng nội dung ra cùng version, khác nội dung ra khác version**. Nhờ đó so sánh được kết quả giữa hai mô hình, và giảng viên chạy lại có thể đối chiếu.
+- **Hai lần chạy liên tiếp:** `step 4` ra `a55001de6327`, chạy `cli export-dataset` lại vẫn ra `a55001de6327` (1019 khung: train 654, val 196, test 169), dù `created_at` trong manifest đã đổi. Sau bài tập sập ở bước 5 và lần chạy `step all --reset` cuối, version cũng vẫn giữ nguyên.
+- **Liên hệ MSSV:** `gold_dataset_frames.sql` xếp trip trong mỗi drive theo `md5(trip_id || LAB_STUDENT_ID)`, rồi lấy 70% đầu làm train, 15% làm val, phần còn lại làm test. Mình thử đổi MSSV thành `2A202602941`: version thành `a3eff0b109cd`, số khung train/val/test thành 671/154/194 (thay vì 654/196/169), trong khi số trip mỗi split vẫn là 18/4/4 và tổng vẫn 1019 khung. Khôi phục `2A202602940` thì version về lại `a55001de6327`. Vậy dữ liệu giống nhau nhưng MSSV khác dẫn tới thứ tự trip khác, split khác, version khác. Đây là cách giảng viên kiểm tra bài có đúng do MSSV này chạy hay không.
 
 ### Câu 8
 Đọc phần `lineage` trong `manifest.json` của dataset bạn. Trả lời "dataset này được tạo từ dữ liệu nào?" bằng chính nội dung đó. Nếu một người hỏi 3 tháng sau, thông tin nào giúp tái tạo lại đúng dataset này?
 
-(trả lời ở đây)
+`lake/gold/datasets/a55001de6327/manifest.json` có:
+
+```json
+"lineage": {
+  "bronze.raw_telemetry_a": 0, "bronze.raw_telemetry_b": 0, "bronze.trips_raw": 0, "bronze.video_files": 1,
+  "silver.frames": 27, "silver.telemetry": 0, "silver.frames_flagged": 0, "silver.frame_telemetry": 0,
+  "input_video_sha256": {
+    "drive_a": "636ba1a98dfc5ba665d1c935e1d2064e69f4df360ff9ffbd15795957d5e7e9aa",
+    "drive_b": "bfa62703f645ff77a8578ae3fc74a00881140d38a404d43c8e2af265bbee9fdc" } },
+"rules": {"drop": ["is_black","is_blurry","is_near_dup","not sync_ok"], "split": "per trip, stratified by drive, md5 order"}
+```
+
+Dataset `a55001de6327` (1019 khung: drive A 436, drive B 583) được tạo từ:
+- Hai video gốc có đúng hai sha256 ở trên.
+- Telemetry thô A và B ở **version 0** của bảng bronze.
+- Bảng `video_files` ở **version 1** (chứa offset 1500 ms của B).
+- `silver.frames` ở **version 27**. Số version cao vì 26 lần ghi theo partition trip, cộng thêm 2 lần chạy lại `trip-00003` trong thí nghiệm idempotent, nên version của bảng **khác** với dữ liệu: nội dung vẫn y như version 25, chỉ lịch sử dài hơn.
+- Các bảng silver dbt ở version 0.
+- Luật loại khung: đen, mờ, trùng, mất đồng bộ.
+
+3 tháng sau, để tái tạo đúng dataset này cần:
+1. Hai file video khớp sha256, cùng `telemetry_a.csv`/`telemetry_b.csv`/`trips.csv`/`sources.json` (đã kiểm bằng `data/MANIFEST.json`).
+2. Mã pipeline ở cùng commit git, gồm cả các ngưỡng trong `dbt_project.yml`: `dark_luma=12`, `blur_var=40`, `dup_hamming=2`, `sync_tol_ms=150`, `split 0.70/0.15`.
+3. **`LAB_STUDENT_ID = 2A202602940`**, vì nó quyết định split.
+
+Chạy lại sẽ phải ra đúng `a55001de6327`. Nếu ra version khác thì biết ngay là một trong ba thứ trên đã đổi. Ngoài ra, các version Delta trong lineage cho phép đọc lại bảng silver đúng thời điểm (time travel), miễn là chưa `VACUUM`.
 
 ## Bước 5 · Điều phối và phục vụ
 

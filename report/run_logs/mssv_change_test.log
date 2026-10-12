@@ -1,0 +1,15 @@
+  {"dataset_version": "a3eff0b109cd", "frames": 1019, "by_split": {"test": 194, "val": 154, "train": 671}, "trips_by_split": {"train": 18, "val": 4, "test": 4}}
+drive_a   train  284         9     37.0         
+drive_a   val    67          2     48.0         
+drive_a   test   85          2     42.0         
+drive_b   train  387         9     63.0         
+drive_b   val    87          2     75.0         
+drive_b   test   109         2     93.0         
+MSSV dùng để chia split: 2A202602941
+CẦN THẤY: mỗi drive có đủ train, val, test; một trip chỉ nằm trong MỘT split; dataset_version là chuỗi 12 ký tự (đổi MSSV thì đổi version).
+  PASS  one dataset_version, manifest.json agrees with the table              version a3eff0b109cd
+  {"dataset_version": "a55001de6327", "frames": 1019, "by_split": {"val": 196, "train": 654, "test": 169}, "trips_by_split": {"test": 4, "train": 18, "val": 4}}
+MSSV dùng để chia split: 2A202602940
+CẦN THẤY: mỗi drive có đủ train, val, test; một trip chỉ nằm trong MỘT split; dataset_version là chuỗi 12 ký tự (đổi MSSV thì đổi version).
+  PASS  one dataset_version, manifest.json agrees with the table              version a55001de6327
+7/7 checks passed
