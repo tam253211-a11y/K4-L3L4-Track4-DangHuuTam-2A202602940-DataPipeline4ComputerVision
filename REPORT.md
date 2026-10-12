@@ -222,7 +222,13 @@ Sau bài tập mình đã xóa `LAB_FAIL_ONCE` khỏi `.env` và áp dụng lạ
 ### Câu 10
 Nâng từ 2 drive lên **500 xe mỗi ngày**: ba thành phần nào của pipeline này sẽ vỡ đầu tiên, và bạn thay bằng gì (nối với slide 12, 22, 23)?
 
-(trả lời ở đây)
+**Quy mô:** lab hiện có 2 drive × khoảng 5 phút = 10 phút video, 1 camera, ra 1246 khung. Với 500 xe × 8 giờ/ngày thì có khoảng 4000 giờ video **mỗi camera**, gấp khoảng **24 000 lần**, tức khoảng 29 triệu khung/ngày ở 2 fps (L2D gốc có 7 camera, nên nhân thêm 7). Ba thành phần vỡ trước:
+
+1. **Giải mã video bằng FFmpeg trong một container Airflow** (`silver_frames`, 1 task cho mỗi trip, chạy trên CPU của một máy, `mem_limit` 2,5 GB). Decode là nút cổ chai (slide 24); hiện cả DAG cho 10 phút video đã mất khoảng 2 phút 48 giây (Airflow, run `run1_xanh`), nhân 24 000 lần là hàng chục ngày máy cho mỗi ngày dữ liệu. **Thay bằng:** worker phân tán (KubernetesExecutor, hoặc Ray/Spark trên một cụm), dùng GPU decode (NVDEC), chỉ decode các khung cần lấy mẫu, và đưa việc trích khung lên gần nguồn (trên xe hoặc ngay lúc ingest), không để lại tới lúc chạy batch.
+2. **DuckDB + dbt chạy trên một file `lakehouse.duckdb`** (slide 22, tầng ELT). Một máy, một tiến trình ghi, dữ liệu phải nằm vừa RAM và đĩa cục bộ; các join ASOF trên hàng tỷ dòng telemetry mỗi ngày sẽ không chạy kịp. **Thay bằng:** engine phân tán đọc thẳng Delta trên object storage (Spark/Databricks, Trino), vẫn giữ dbt làm lớp mô hình và test (dbt-spark), và **xử lý tăng dần** theo partition `ngày/xe` thay vì `--reset` toàn bộ.
+3. **Điều phối và lưu trữ một node:** Airflow LocalExecutor với dynamic mapping (26 task hôm nay sẽ thành hàng chục nghìn mapped task mỗi ngày, làm nghẽn scheduler và metadata DB), cùng MinIO một node chứa hàng chục triệu file JPEG nhỏ. **Thay bằng:** ingest hướng sự kiện (xe upload xong thì có message trên hàng đợi, chẳng hạn Kafka hay S3 event, rồi kích hoạt xử lý cho đúng partition đó); Airflow chỉ điều phối ở mức `ngày × xe`, chạy trên Celery/Kubernetes executor; object storage nhiều node hoặc cloud (S3/GCS), với khung ảnh gom thành shard (WebDataset/TFRecord/Parquet) thay vì mỗi khung một file.
+
+Những gì **giữ nguyên được**: medallion, cách ly có lý do, overwrite theo partition (idempotent), chia theo cảnh, `dataset_version` bằng băm nội dung và lineage. Đó là các nguyên tắc, không phụ thuộc quy mô. *(Mình chưa có slide trong tay để đối chiếu đúng số slide 12/23; phần nối slide dựa trên bảng ánh xạ slide của README.)*
 
 ## Câu hỏi riêng của bạn trên Metabase
 
@@ -234,4 +240,27 @@ Câu SQL bạn thêm vào dashboard và điều nó cho biết:
 
 Điều bạn thấy bất ngờ nhất, điều gì còn chưa rõ, và một lỗi dữ liệu mà bạn nghĩ pipeline **chưa** bắt được (nếu có). Tối đa 8 dòng.
 
-(trả lời ở đây)
+- **Bất ngờ nhất:** cảnh báo `max_gap_ms` (bước 2) và 6 khung `sync_lost` của mỗi drive (bước 3) là *cùng một sự cố*: 30 dòng `speed_missing` liên tiếp, khoảng 3 s mất tín hiệu. Một lỗi nguồn hiện ra ở ba nơi (rejects, test warn, cờ khung); lineage giúp nối chúng lại.
+- **Chưa rõ:** khung **đầu tiên** của mỗi drive (`08:00:00.000`, `14:30:00.000`) luôn bị loại vì ASOF join chỉ nhìn **ngược** thời gian (`event_time >= ts`), mà mẫu telemetry đầu đến sau 9–14 ms. Khung đó hợp lệ, chỉ cần join "gần nhất hai phía". Mình chưa rõ việc chỉ nhìn ngược là cố ý (không dùng dữ liệu "tương lai") hay là một hạn chế.
+- **Lỗi pipeline chưa bắt:** độ lệch đồng hồ của B chỉ là **một hằng số khai báo** (1500 ms), và verify chỉ kiểm mẫu đầu trong 0,5 s. Nếu đồng hồ thiết bị **trôi dần** (mỗi phút lệch thêm vài chục ms) hoặc khai báo sai, thì `sync_gap_ms` vẫn nhỏ, vì nó chỉ đo khoảng cách tới mẫu telemetry gần nhất, không đo độ đúng của đồng hồ. Không test nào bắt được. Muốn bắt cần đối chiếu một tín hiệu độc lập, ví dụ chuyển động ước lượng từ video (optical flow) so với `speed_mps`.
+- Tương tự, `in_range` chỉ bắt giá trị **vô lý** (250 m/s). Giá trị **hợp lý nhưng sai**, như tốc độ đứng yên một con số suốt 20 s khi video cho thấy xe đang chạy, vẫn lọt qua.
+
+## Thí nghiệm riêng (bonus): đổi `sync_tol_ms`
+
+Không sửa file cấu hình: mình chạy `scripts/lab.sh dbt run --select silver_frame_telemetry gold_dataset_frames --vars '{sync_tol_ms: X}'`, đếm gold, rồi chạy lại không có `--vars` để khôi phục mặc định 150 ms (gold về 1019). Log ở `report/run_logs/bonus_sync_tol.log`.
+
+| `sync_tol_ms` | khung `sync_lost` | khung gold | train / val / test | gap lớn nhất trong gold (ms) | gap trung bình (ms) |
+|---|---|---|---|---|---|
+| 50 | 600 | **538** | 351 / 94 / 93 | 20 | 9,7 |
+| 100 | 324 | 762 | 488 / 144 / 130 | 100 | 33,3 |
+| **150 (mặc định)** | 14 | **1019** | 654 / 196 / 169 | 120 | 52,9 |
+| 300 | 14 | 1019 | 654 / 196 / 169 | 120 | 52,9 |
+| 1000 | 11 | 1022 | 654 / 199 / 169 | **884** | 54,6 |
+| 3000 | 3 | 1030 | 654 / 207 / 169 | **2884** | 69,7 |
+
+Nhận xét:
+- Telemetry khoảng 10 Hz, tức mỗi mẫu cách nhau khoảng 100 ms, và khung lấy ở thời điểm bất kỳ. Vì vậy dung sai < 100 ms loại cả những khung bình thường: ở 50 ms mất **47%** dataset (1019 xuống 538) mà không vì lỗi gì.
+- Từ 150 đến 300 ms kết quả **không đổi**: mọi khung bình thường đều có telemetry trong vòng 120 ms, còn 14 khung `sync_lost` là 12 khung trong 2 lần mất tín hiệu cộng 2 khung đầu không có mẫu phía trước. 150 ms nằm đúng trong "vùng ổn định" này.
+- Nới lên 1000 hoặc 3000 ms thì gold tăng thêm 3 và 11 khung, nhưng đó chính là các khung trong lúc mất tín hiệu, được gắn telemetry **cũ tới 2,9 s**. Ở tốc độ 20 m/s, như vậy là lệch khoảng 58 m: nhãn tốc độ, góc lái **sai** mà không ai biết.
+
+Kết luận: `sync_tol_ms` nên lớn hơn chu kỳ lấy mẫu telemetry một chút (khoảng 1,5 lần chu kỳ), nhưng nhỏ hơn nhiều so với độ dài một lần mất tín hiệu. 150 ms là hợp lý cho telemetry 10 Hz.

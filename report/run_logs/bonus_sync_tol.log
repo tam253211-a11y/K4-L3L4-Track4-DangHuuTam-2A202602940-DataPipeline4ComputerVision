@@ -1,0 +1,35 @@
+14:47:07  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=3
+== sync_tol_ms=150
+sync_lost  gold_frames  train  val  test  max_gap_trong_gold  tb_gap
+---------  -----------  -----  ---  ----  ------------------  ------
+14         1019         654    196  169   120                 52.9  
+14:47:20  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=3
+== sync_tol_ms=50
+sync_lost  gold_frames  train  val  test  max_gap_trong_gold  tb_gap
+---------  -----------  -----  ---  ----  ------------------  ------
+600        538          351    94   93    20                  9.7   
+14:47:33  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=3
+== sync_tol_ms=100
+sync_lost  gold_frames  train  val  test  max_gap_trong_gold  tb_gap
+---------  -----------  -----  ---  ----  ------------------  ------
+324        762          488    144  130   100                 33.3  
+14:47:44  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=3
+== sync_tol_ms=300
+sync_lost  gold_frames  train  val  test  max_gap_trong_gold  tb_gap
+---------  -----------  -----  ---  ----  ------------------  ------
+14         1019         654    196  169   120                 52.9  
+14:47:57  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=3
+== sync_tol_ms=1000
+sync_lost  gold_frames  train  val  test  max_gap_trong_gold  tb_gap
+---------  -----------  -----  ---  ----  ------------------  ------
+11         1022         654    199  169   884                 54.6  
+14:48:09  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=3
+== sync_tol_ms=3000
+sync_lost  gold_frames  train  val  test  max_gap_trong_gold  tb_gap
+---------  -----------  -----  ---  ----  ------------------  ------
+3          1030         654    207  169   2884                69.7  
+== khôi phục mặc định
+14:48:21  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=3
+gold_frames
+-----------
+1019       
