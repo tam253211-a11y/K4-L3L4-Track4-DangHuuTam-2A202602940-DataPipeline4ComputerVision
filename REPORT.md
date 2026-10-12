@@ -7,7 +7,7 @@
 | Họ và tên | Đặng Hữu Tâm |
 | MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `2A202602940` |
 | GitHub | `tam253211-a11y` |
-| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `<điền: trip-xxxxx>` |
+| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-06667` (MSSV có chữ `A` nên `int(MSSV)` lỗi; dùng phần chữ số `2202602940 % 26 = 18`, phần tử thứ 18 của `cli list-trips`) |
 
 ## Kết quả cuối
 
@@ -190,7 +190,34 @@ Chạy lại sẽ phải ra đúng `a55001de6327`. Nếu ra version khác thì b
 ### Câu 9
 Mô tả chính xác điều xảy ra khi trip của bạn sập rồi chạy lại: bao nhiêu task chuyển đỏ, bao nhiêu task `upstream_failed`, bạn clear gì, dữ liệu có nhân đôi không, `dataset_version` có đổi không? Bằng chứng (ảnh, số) là gì?
 
-(trả lời ở đây)
+Cách làm: đặt `LAB_FAIL_ONCE=trip-06667` trong `.env`, chạy `docker compose up -d`, trigger `day09_reset` rồi trigger `day09_video_pipeline` (run `run2_sap`).
+
+**Khi sập** (37 task instance trong run):
+- **1 task đỏ**: `silver_frames` có map_index **18**. Log `attempt=1` có dòng `RuntimeError: simulated crash while extracting trip-06667; run it again`.
+- **7 task `upstream_failed`**: `dbt_run_silver`, `dbt_test_silver`, `dbt_run_gold`, `dbt_test_gold`, `publish_lake`, `export_dataset`, `publish_warehouse`.
+- **29 task success**: `bronze_drive_a`, `bronze_drive_b`, `bronze_trips`, `trip_commands` và 25 task `silver_frames` của các trip khác.
+
+Như vậy dbt và gold **không chạy** trên silver thiếu 1 trip, nên không sinh ra dataset thiếu dữ liệu mà không ai biết.
+
+**Chạy lại:** chỉ clear task đỏ cùng các task phía sau của nó (`airflow tasks clear -t '^silver_frames$' -d --only-failed`, tương đương nút *Clear task* trên giao diện). Kết quả:
+- Chỉ `silver_frames[18]` có log `attempt=2`.
+- 25 trip đã thành công **không chạy lại**.
+- 7 task phía sau chạy lần đầu.
+- Run chuyển xanh: **37/37 success**.
+
+**Dữ liệu:**
+- `lake.silver_frames` có **1246 dòng / 1246 frame_id khác nhau**, bằng đúng lúc chưa sập, không nhân đôi.
+- `trip-06667` có 29 khung, ghi bằng đúng một commit Delta (`version 25, rows_added 29, predicate trip_id = 'trip-06667'`).
+- Lần sập xảy ra *trước* khi ghi, nên không để lại dữ liệu dở dang.
+- `scripts/lab.sh verify` cho **27/27**, `dataset_version` vẫn là **`a55001de6327`** (1019 khung, 654/196/169).
+
+Bằng chứng gồm:
+- Ảnh `report/screenshots/fail_task_log.png` (log đỏ thấy `trip-06667`).
+- Ảnh `airflow_fail_graph.png` (silver_frames đỏ, các task sau màu cam).
+- Ảnh `airflow_retry_graph.png` (xanh sau khi clear).
+- Các log `report/run_logs/fail_task_attempt1.log` và `verify_after_retry.log`.
+
+Sau bài tập mình đã xóa `LAB_FAIL_ONCE` khỏi `.env` và áp dụng lại Compose.
 
 ### Câu 10
 Nâng từ 2 drive lên **500 xe mỗi ngày**: ba thành phần nào của pipeline này sẽ vỡ đầu tiên, và bạn thay bằng gì (nối với slide 12, 22, 23)?
