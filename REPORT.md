@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| Họ và tên | `<điền>` |
-| MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `<điền>` |
-| GitHub | `<điền: tên tài khoản>` |
+| Họ và tên | Đặng Hữu Tâm |
+| MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `2A202602940` |
+| GitHub | `tam253211-a11y` |
 | Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `<điền: trip-xxxxx>` |
 
 ## Kết quả cuối
@@ -21,7 +21,22 @@
 ### Câu 1
 Liệt kê **ít nhất 4 khác biệt** giữa telemetry nguồn A và nguồn B mà bạn thấy ở bronze. Vì sao pipeline giữ **mỗi nguồn một bảng bronze** và để mọi cột ở dạng chữ, thay vì gộp và ép kiểu ngay?
 
-(trả lời ở đây)
+Khác biệt thấy trong 2 dòng đầu của `bronze_raw_telemetry_a` (3021 dòng) và `bronze_raw_telemetry_b` (3234 dòng):
+
+| | A | B |
+|---|---|---|
+| Thời gian | `ts_utc` chuỗi ISO UTC (`2025-10-07T08:00:00.014Z`) | `timestamp_ms` epoch mili giây (`1759933801509`) |
+| Tốc độ | `speed_mps` (m/s, `1.213`) | `spd_kmh` (km/h, `55.11`) |
+| Bàn đạp | `gas`, `brake` tỷ lệ 0–1 (`0.028`) | `throttle_pct`, `brake_pct` theo % (`2.0`) |
+| Tên cột khác | `heading_deg`, `lat/lon/alt_m`, `acc_x/acc_y`, `steer` | `hdg`, `latitude/longitude/altitude`, `ax/ay`, `steering` |
+| Đồng hồ | `telemetry_clock_offset_ms = 0` | `telemetry_clock_offset_ms = 1500`: mẫu đầu `1759933801509` = 14:30:01.509 UTC, chậm 1,5 s so với video bắt đầu 14:30:00 |
+
+Ở bronze, `typeof(speed_mps)` và `typeof(spd_kmh)` đều là `VARCHAR`, và mỗi bảng có 30 ô tốc độ trống vẫn được giữ nguyên. Lý do không gộp và ép kiểu ngay:
+- Hai schema khác nhau. Gộp ở bronze buộc phải chọn luật chuyển đổi ngay lúc nạp; nếu luật sai (quên chia 3,6, quên trừ 1500 ms) thì bản gốc mất luôn. Giữ nguyên bản cho phép sửa luật ở silver rồi chạy lại mà không phải ingest lại.
+- Ép kiểu lúc nạp sẽ làm hỏng hoặc rơi mất dòng xấu (ô trống, giá trị lạ) trước khi ai kịp đếm. Để dạng chữ thì mọi dòng đều vào bronze (đúng 3021/3234 = số dòng CSV), còn việc phân loại lỗi để silver làm và ghi lý do vào `rejects`.
+- Bronze chỉ thêm, có `_source_file`, `_batch_id`, `_row_no`, nên mỗi dòng silver truy ngược được về đúng dòng CSV gốc.
+
+Chạy lại: lần nạp thứ hai báo `video: already present, telemetry_rows: already present` vì file được nhận diện bằng sha256 (`636ba1a9…` cho A, `bfa62703…` cho B). `cli history bronze.raw_telemetry_a` chỉ có **1 commit** (`version 0, WRITE, rows_added 3021`), nên nạp hai lần không nhân đôi dữ liệu.
 
 ## Bước 2 · Silver telemetry
 
