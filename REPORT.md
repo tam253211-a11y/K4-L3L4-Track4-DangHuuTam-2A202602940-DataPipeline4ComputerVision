@@ -229,9 +229,9 @@ Nâng từ 2 drive lên **500 xe mỗi ngày**: ba thành phần nào của pipe
 
 Những gì **giữ nguyên được**: medallion, cách ly có lý do, overwrite theo partition (idempotent), chia theo cảnh, `dataset_version` bằng băm nội dung và lineage. Đó là các nguyên tắc, không phụ thuộc quy mô. *(Mình chưa có slide trong tay để đối chiếu đúng số slide 12/23; phần nối slide dựa trên bảng ánh xạ slide của README.)*
 
-## Câu hỏi riêng của bạn trên Metabase
+## Metabase
 
-Câu SQL bạn thêm vào dashboard và điều nó cho biết:
+Câu SQL thêm vào dashboard và điều nó cho biết:
 
 Hai câu hỏi đã được thêm vào cuối dashboard **"Day 9: video data pipeline"** (`http://localhost:3000/dashboard/2`), xem `report/screenshots/metabase_dashboard.png`.
 
@@ -282,8 +282,6 @@ from marts.mart_frame_funnel order by drive_id
 Ý nghĩa vận hành: hao hụt của A gấp khoảng 3 lần B, và gần như toàn bộ là do **khung trùng**, không phải do lỗi cảm biến (đen, mờ, mất đồng bộ chỉ khoảng 1% mỗi loại). Muốn tăng dữ liệu cho A, nên đổi cách lấy mẫu (theo quãng đường thay vì 2 khung/giây) thay vì sửa phần cứng. B có 9,5% khung tối được giữ lại (đường hầm), nên cần theo dõi xem các khung tối có rơi đều vào cả train, val và test hay không.
 
 ## Nhìn lại
-
-Điều bạn thấy bất ngờ nhất, điều gì còn chưa rõ, và một lỗi dữ liệu mà bạn nghĩ pipeline **chưa** bắt được (nếu có). Tối đa 8 dòng.
 
 - **Bất ngờ nhất:** cảnh báo `max_gap_ms` (bước 2) và 6 khung `sync_lost` của mỗi drive (bước 3) là *cùng một sự cố*: 30 dòng `speed_missing` liên tiếp, khoảng 3 s mất tín hiệu. Một lỗi nguồn hiện ra ở ba nơi (rejects, test warn, cờ khung); lineage giúp nối chúng lại.
 - **Chưa rõ:** khung **đầu tiên** của mỗi drive (`08:00:00.000`, `14:30:00.000`) luôn bị loại vì ASOF join chỉ nhìn **ngược** thời gian (`event_time >= ts`), mà mẫu telemetry đầu đến sau 9–14 ms. Khung đó hợp lệ, chỉ cần join "gần nhất hai phía". Mình chưa rõ việc chỉ nhìn ngược là cố ý (không dùng dữ liệu "tương lai") hay là một hạn chế.
