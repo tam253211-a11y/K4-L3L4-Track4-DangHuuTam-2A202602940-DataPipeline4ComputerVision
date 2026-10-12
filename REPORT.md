@@ -7,7 +7,6 @@
 | GitHub | `tam253211-a11y` |
 | Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-06667` |
 
-> Cách tính trip: MSSV `2A202602940` có chữ `A` nên lệnh `int(MSSV) % 26` của GUIDE báo lỗi. Mình dùng phần chữ số `2202602940`: `2202602940 % 26 = 18`, phần tử thứ 18 (đếm từ 0) của `scripts/lab.sh cli list-trips` là `trip-06667`.
 
 ## Kết quả cuối
 
