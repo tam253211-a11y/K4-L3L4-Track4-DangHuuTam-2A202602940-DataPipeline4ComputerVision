@@ -65,7 +65,7 @@ Tổng cộng `silver.telemetry` có 6149 dòng và `silver.telemetry_rejects` c
 ### Câu 3
 Vì sao test `max_gap_ms` là `warn` còn `in_range` là `error`? Kết quả thí nghiệm `break-gate` của bạn (`break_gate.json`): test nào bắt được, bao nhiêu dòng, và điều đó cho biết gì về vai trò của "cổng chất lượng"?
 
-**`max_gap_ms` là warn.** Trong `schema.yml` test này có `severity: warn` kèm comment *"sensor dropouts are reported, not fatal"*. Khoảng trống hơn 1 s là cảm biến mất tín hiệu thật: mỗi drive có đúng 1 khoảng như vậy (A dài 3073 ms, B dài 3124 ms). Dữ liệu ở đó không sai, chỉ thiếu. Bước sau đã tự xử lý: frame rơi vào khoảng trống không ghép được telemetry trong dung sai nên bị đánh `sync_lost` và loại khỏi gold. Dừng cả pipeline vì một lần mất tín hiệu là quá tay, nên chỉ cần báo để người vận hành theo dõi.
+**`max_gap_ms` là warn.** Trong `schema.yml` test này có `severity: warn` kèm comment *"sensor dropouts are reported, not fatal"*. Khoảng trống hơn 1 s là cảm biến mất tín hiệu thật: mỗi drive có đúng 1 khoảng như vậy (A từ 08:01:59.116 đến 08:02:02.189, dài 3073 ms; B dài 3124 ms). Khoảng này trùng khít với 30 dòng `speed_missing` liên tiếp đã bị cách ly. Dữ liệu còn lại không sai, chỉ thiếu một đoạn. Bước 3 đã tự xử lý: 6 frame mỗi drive rơi vào khoảng trống có `sync_gap_ms` từ 384 đến 2884 ms (A), vượt `sync_tol_ms = 150`, nên bị đánh mất đồng bộ và loại khỏi gold. Dừng cả pipeline vì một lần mất tín hiệu là quá tay, nên chỉ cần báo để người vận hành theo dõi.
 
 **`in_range` (0..70 m/s) là error** (mặc định của dbt). Tốc độ ngoài khoảng này là **sai giá trị**, không phải thiếu. Nó sẽ thành nhãn sai trong dataset huấn luyện, nên bắt buộc phải chặn.
 
@@ -80,18 +80,55 @@ Vì sao test `max_gap_ms` là `warn` còn `in_range` là `error`? Kết quả th
 ### Câu 4
 Dựa vào `idempotency.json`: số dòng trước và sau hai lần chạy lại, và khi ghi kiểu `append`. Vì sao Delta `overwrite` theo partition (một trip) an toàn hơn xoá rồi ghi lại, nhất là khi giữa chừng có lỗi?
 
-(trả lời ở đây)
+Thí nghiệm chạy lại partition `trip-00003` (60 khung) hai lần:
+
+| | số dòng `silver.frames` | dấu vân tay |
+|---|---|---|
+| Trước | 1246 | `6c7480dfde7e` |
+| Sau 2 lần chạy lại (overwrite theo `trip_id`) | **1246** | **`6c7480dfde7e`** (`unchanged: true`) |
+| Mô phỏng `append` chạy 2 lần | trip có 60 khung thành **120 dòng** (gấp đôi) | — |
+
+`cli history silver.frames` cho thấy 2 commit mới (version 26 và 27), mỗi commit `rows_added: 60` với `predicate: trip_id = 'trip-00003'`. Mỗi lần ghi **thay thế** đúng 60 dòng của trip đó, không cộng thêm.
+
+Vì sao overwrite theo partition an toàn hơn "xóa rồi ghi lại":
+- **Nguyên tử.** Delta ghi file Parquet mới trước, sau đó một commit duy nhất vào `_delta_log` vừa đánh dấu file cũ của trip là đã bỏ, vừa thêm file mới. Nếu tiến trình chết giữa chừng (như bài tập sập ở bước 5) thì commit chưa xảy ra: người đọc vẫn thấy đủ 60 dòng cũ, file dở dang chỉ là rác, không ai đọc tới.
+- Với "DELETE rồi INSERT" (hai giao dịch), nếu sập sau DELETE thì trip đó **mất trắng**, và bước gold chạy lúc đó sẽ ra dataset thiếu trip mà không ai biết.
+- **Phạm vi hẹp.** Predicate `trip_id = ...` chỉ đụng tới một trip, 25 trip còn lại không bị ghi lại. Vì vậy Airflow chạy lại được một task `silver_frames` riêng lẻ, và chạy bao nhiêu lần kết quả cũng như nhau.
+- **Time travel.** Version cũ vẫn còn, nên có thể so sánh hoặc quay lại nếu lần ghi mới sai.
 
 ### Câu 5
 Khung hình **đen** và khung hình **tối** khác nhau thế nào, pipeline xử lý khác nhau ra sao, bạn có đồng ý không? Dựa vào `threshold.json`: nếu chọn ngưỡng 0, 2, 6 thì bao nhiêu khung bị coi là trùng ở mỗi drive? Bạn chọn ngưỡng nào, vì sao, và ngưỡng đó phụ thuộc vào tốc độ xe thế nào?
 
 | dHash khác tối đa | số khung trùng, drive A | số khung trùng, drive B |
 |---|---|---|
-| 0 | | |
-| 2 | | |
-| 6 | | |
+| 0 | 61 / 602 | 8 / 644 |
+| 2 (đang dùng) | 149 / 602 | 53 / 644 |
+| 6 | 363 / 602 | 244 / 644 |
 
-(trả lời ở đây)
+**Đen và tối khác nhau** (bước 3, ngưỡng `dark_luma = 12`, `dark_soft = 40` trong `dbt_project.yml`):
+
+| | drive A | drive B | độ sáng trung bình |
+|---|---|---|---|
+| Khung đen (`is_black`) | 6 | 4 | 0,0 (min = max = 0; độ nét cũng bằng 0) |
+| Khung tối được giữ (`is_dark`) | 4 | **61** | A 37,4; B 30,8 (khoảng 12,8–39,6) |
+
+Khung đen là **lỗi thiết bị**: cả ảnh bằng 0, không có thông tin gì, nên bị loại khỏi gold. Khung tối là **điều kiện thật** (đường hầm, bóng râm ở B): ảnh vẫn có nội dung (blur_score trung bình 333, so với 0 của khung đen), chỉ thiếu sáng. Pipeline gắn cờ `is_dark` nhưng **giữ** khung tối. Mình đồng ý: nếu bỏ khung tối thì model không bao giờ được học cảnh hầm hay ban đêm, đúng những lúc xe cần nó nhất. Cờ `is_dark` vẫn cho phép lọc hoặc cân bằng lại khi train nếu cần.
+
+**Ngưỡng trùng.** Mình chọn **2** (giữ nguyên ngưỡng của pipeline):
+- Ngưỡng 0 chỉ bắt khung giống hệt từng bit: 61 khung ở A, mới khoảng 10%. Nó bỏ sót camera đứng hình vì nhiễu nén vẫn làm lệch vài bit (verify chỉ bắt 11/12 khung đứng hình ở ngưỡng 2).
+- Ngưỡng 6 loại 363/602 khung ở A (60%) và 244/644 ở B (38%). Khi đó bắt đầu loại cả những khung khác nhau thật, chẳng hạn cảnh đường cao tốc ít chi tiết. dHash chỉ có 64 bit, nên 6 bit là gần 10% ảnh.
+- Ngưỡng 2 bắt hết phần lớn khung đứng hình, chỉ loại khoảng 25% (A) và 8% (B).
+
+**Phụ thuộc vào tốc độ** (đo trên `silver.frame_telemetry`, ngưỡng 2):
+
+| tốc độ | drive A: tỷ lệ khung trùng | drive B |
+|---|---|---|
+| < 2 m/s (gần dừng) | **59,3%** (54/91) | không có |
+| 2–8 m/s | 11,3% | 0% |
+| 8–15 m/s | 14,5% | 2,5% |
+| ≥ 15 m/s | 23,3% (có trip-04622 đứng hình 6 s) | 10,0% |
+
+Xe gần dừng thì 2 khung cách nhau 0,5 s gần như giống hệt, nên trùng nhiều là đúng. Khi xe chạy nhanh, khung nào trùng chủ yếu là do lỗi (đứng hình) hoặc cảnh đơn điệu. Ngưỡng tốt nên **phụ thuộc tốc độ**: chặt hơn (0–1 bit) khi xe chạy nhanh, vì cảnh phải thay đổi nhiều, khung nào trùng gần như chắc chắn là lỗi; nới hơn (2–4 bit) khi xe dừng, để bớt các khung thừa không thêm thông tin. Một cách khác là lấy mẫu theo quãng đường thay vì theo thời gian.
 
 ## Bước 4 · Gold
 
