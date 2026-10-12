@@ -43,12 +43,37 @@ Chạy lại: lần nạp thứ hai báo `video: already present, telemetry_rows
 ### Câu 2
 Pipeline đưa hai nguồn về một schema như thế nào (đơn vị, kiểu thời gian, **độ lệch đồng hồ**)? Bằng chứng nào trong kết quả bước 2 cho thấy đã đúng? Dán bảng quarantine của bạn (số dòng theo từng lý do, từng drive) và giải thích vì sao dòng lỗi vào `rejects` thay vì bị xoá.
 
-(trả lời ở đây)
+Hai model staging đưa cả hai nguồn về cùng các cột `ts` (timestamptz UTC), `speed_mps`, `heading_deg`, `lat/lon/alt_m`, `acc_x/acc_y`, `gas/brake` (0–1), `steer`:
+- `stg_telemetry_a.sql` chỉ ép kiểu, vì A đã dùng m/s, ISO UTC và lệch 0.
+- `stg_telemetry_b.sql` làm 4 việc: đổi tên cột; `spd_kmh / 3.6` để ra m/s; `throttle_pct / 100` và `brake_pct / 100`; `to_timestamp((timestamp_ms - offset_ms) / 1000.0)`, trong đó `offset_ms` được join từ `bronze.video_files` (1500 ms, khai báo trong `sources.json`) chứ không viết cứng.
+
+Bằng chứng trong đầu ra bước 2:
+- `bat_dau` của B là `2025-10-08 14:30:00.009`, khớp video bắt đầu lúc 14:30:00. Trước khi trừ, mẫu đầu là 14:30:01.509.
+- Tốc độ tối đa sau chuẩn hóa: A 71 km/h, B 100 km/h. Cả hai đều hợp lý; nếu B quên chia 3,6 thì sẽ ra khoảng 360 km/h.
+- Kết quả verify module 2: 7/7.
+
+| drive | duplicate | speed_missing | speed_out_of_range | tổng cách ly | dòng sạch | sạch + cách ly |
+|---|---|---|---|---|---|---|
+| drive_a | 20 | 30 | 3 | 53 | 2968 | 3021 = số dòng bronze |
+| drive_b | 20 | 30 | 3 | 53 | 3181 | 3234 = số dòng bronze |
+
+Tổng cộng `silver.telemetry` có 6149 dòng và `silver.telemetry_rejects` có 106 dòng. Dòng lỗi vào `rejects` thay vì bị xóa vì:
+1. Phải đối soát được: sạch + cách ly = nhận về. Nếu xóa im lặng thì không ai biết đã mất 53 dòng mỗi drive.
+2. Mỗi dòng giữ lý do, `_batch_id` và `_row_no`. Ví dụ 3 dòng `speed_out_of_range` của A đều có giá trị `250.0` m/s ở `_row_no` 400, 1700, 2500, nên truy ngược được về đúng dòng CSV để báo cho đội phần cứng.
+3. Nếu luật làm sạch sai (ngưỡng quá chặt), vẫn còn dữ liệu để phục hồi mà không phải ingest lại.
 
 ### Câu 3
 Vì sao test `max_gap_ms` là `warn` còn `in_range` là `error`? Kết quả thí nghiệm `break-gate` của bạn (`break_gate.json`): test nào bắt được, bao nhiêu dòng, và điều đó cho biết gì về vai trò của "cổng chất lượng"?
 
-(trả lời ở đây)
+**`max_gap_ms` là warn.** Trong `schema.yml` test này có `severity: warn` kèm comment *"sensor dropouts are reported, not fatal"*. Khoảng trống hơn 1 s là cảm biến mất tín hiệu thật: mỗi drive có đúng 1 khoảng như vậy (A dài 3073 ms, B dài 3124 ms). Dữ liệu ở đó không sai, chỉ thiếu. Bước sau đã tự xử lý: frame rơi vào khoảng trống không ghép được telemetry trong dung sai nên bị đánh `sync_lost` và loại khỏi gold. Dừng cả pipeline vì một lần mất tín hiệu là quá tay, nên chỉ cần báo để người vận hành theo dõi.
+
+**`in_range` (0..70 m/s) là error** (mặc định của dbt). Tốc độ ngoài khoảng này là **sai giá trị**, không phải thiếu. Nó sẽ thành nhãn sai trong dataset huấn luyện, nên bắt buộc phải chặn.
+
+**Thí nghiệm `break-gate`** (`break_gate.json`): nới `max_speed_mps` từ 70 lên 1000 ở bước làm sạch, nên 6 dòng `250.0` m/s (3 dòng ở mỗi drive) không còn bị cách ly mà lọt vào `silver.telemetry`. Kết quả:
+- Khi nới luật: `dbt test` ra `PASS=5 WARN=1 ERROR=1`, `gate_failed: true`. Test `in_range_silver_telemetry_speed_mps__70__0` bắt được **6 dòng**.
+- Sau khi khôi phục: `PASS=6 WARN=1 ERROR=0`.
+
+Ý nghĩa: luật làm sạch và cổng chất lượng là **hai lớp độc lập**. Khi một người sửa luật làm sạch sai, test `error` trên silver vẫn chặn trước khi frames và gold dùng tới dữ liệu đó. Trong Airflow, task `dbt_test` sẽ đỏ và các task phía sau không chạy. Nếu `in_range` chỉ là `warn` thì 6 dòng 900 km/h đã đi thẳng vào dataset.
 
 ## Bước 3 · Silver frames
 
