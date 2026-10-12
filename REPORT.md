@@ -236,7 +236,53 @@ Những gì **giữ nguyên được**: medallion, cách ly có lý do, overwrit
 
 Câu SQL bạn thêm vào dashboard và điều nó cho biết:
 
-(trả lời ở đây)
+Hai câu hỏi đã được thêm vào cuối dashboard **"Day 9: video data pipeline"** (`http://localhost:3000/dashboard/2`), xem `report/screenshots/metabase_dashboard.png`.
+
+**Câu hỏi riêng 1: tỷ lệ khung bị loại theo trip** (trip nào hao hụt nhiều nhất, và vì sao)
+
+```sql
+select trip_id, drive_id, split, frames as khung_trich, frames_kept as khung_giu,
+       frames - frames_kept as khung_loai,
+       round(100.0 * (frames - frames_kept) / frames, 1) as pct_loai,
+       round(avg_speed_kmh::numeric, 1) as toc_do_tb_kmh
+from marts.mart_trip_summary
+order by pct_loai desc
+```
+
+Kết quả: 5 trip hao hụt nhiều nhất **đều thuộc drive A**:
+- `trip-04622`: 56,7% (34/60)
+- `trip-03904`: 50,0%
+- `trip-02086`: 46,7%
+- `trip-08888`: 40,0%
+- `trip-07774`: 38,2%
+
+Đối chiếu với bước 3, có hai nguyên nhân khác nhau:
+1. **Xe đứng yên.** `trip-08888` chạy trung bình 6,5 km/h, `trip-02086` 17,6 km/h, đều có chuỗi khung trùng dài (23 và 16 khung) khi xe dừng. Loại các khung này là **đúng**, vì chúng không thêm thông tin.
+2. **Lỗi camera.** `trip-03904` chạy 46 km/h nhưng có 11 khung trùng liên tiếp, đó là đoạn **camera đứng hình**. Loại các khung này cũng đúng, nhưng là dấu hiệu cần báo cho đội phần cứng.
+
+`trip-04622` (67 km/h, bị loại 57%) là trường hợp đáng xem lại: xe chạy nhanh mà vẫn mất hơn nửa số khung, nhiều khả năng do cảnh cao tốc ít chi tiết khiến dHash ở ngưỡng 2 coi các khung là trùng. Đây là ứng viên tốt để thử ngưỡng trùng phụ thuộc tốc độ như đề xuất ở Câu 5.
+
+Ngược lại, trip của bài tập sập `trip-06667` chỉ bị loại 6,9% (2/29): chạy lại không làm mất hay nhân đôi khung nào.
+
+**Câu hỏi riêng 2 (bonus, câu hỏi vận hành): lý do loại khung theo drive, tính theo %**
+
+```sql
+select drive_id, frames_total as tong,
+       round(100.0 * dropped_near_dup    / frames_total, 1) as pct_trung,
+       round(100.0 * dropped_blurry      / frames_total, 1) as pct_mo,
+       round(100.0 * dropped_black       / frames_total, 1) as pct_den,
+       round(100.0 * dropped_out_of_sync / frames_total, 1) as pct_mat_dong_bo,
+       round(100.0 * flagged_dark_kept   / frames_total, 1) as pct_toi_giu_lai,
+       frames_kept as giu_lai, round(100.0 * frames_kept / frames_total, 1) as pct_giu_lai
+from marts.mart_frame_funnel order by drive_id
+```
+
+| drive | tổng | trùng | mờ | đen | mất đồng bộ | tối (giữ lại) | giữ lại |
+|---|---|---|---|---|---|---|---|
+| drive_a | 602 | **24,8%** | 1,5% | 1,0% | 1,2% | 0,7% | 436 (**72,4%**) |
+| drive_b | 644 | 8,2% | 0% | 0,6% | 1,1% | **9,5%** | 583 (**90,5%**) |
+
+Ý nghĩa vận hành: hao hụt của A gấp khoảng 3 lần B, và gần như toàn bộ là do **khung trùng**, không phải do lỗi cảm biến (đen, mờ, mất đồng bộ chỉ khoảng 1% mỗi loại). Muốn tăng dữ liệu cho A, nên đổi cách lấy mẫu (theo quãng đường thay vì 2 khung/giây) thay vì sửa phần cứng. B có 9,5% khung tối được giữ lại (đường hầm), nên cần theo dõi xem các khung tối có rơi đều vào cả train, val và test hay không.
 
 ## Nhìn lại
 
